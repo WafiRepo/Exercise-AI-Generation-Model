@@ -38,3 +38,4 @@ output_pretrainSTAGCN_difference
 BaseLine
 results/finetune*
 generate_boxing_gt.py
+README.md
