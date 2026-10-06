@@ -11,7 +11,7 @@ TASK:
     PROJ_STRATEGY : "TIME_POOL"
 
 STANDARD_PATH : "./dataset/FS_standard.pkl"
-WEIGHT_PATH : "./results/pretrain_ref/pretrain_checkpoints/checkpoint_epoch_00012.pth"
+WEIGHT_PATH : "./results/skating_gt/pretrain_checkpoints/best_pretrained_weight.pth"
 
 DATA :
     TRAIN : "./dataset/FS_train.pkl"
@@ -29,4 +29,4 @@ DEBUG : False
 SETTING: "GT"
 EVAL :
     score : True
-    ckpt : "None"
+    ckpt : "./results/skating_gt/checkpoints/checkpoint_epoch_00050.pth"

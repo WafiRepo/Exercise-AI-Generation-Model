@@ -8,8 +8,8 @@ TASK :
     PROJ_STRATEGY : "TIME_POOL"
 
 DATA: 
-    TRAIN : "/home/weihsin/datasets/PretrainDatasetPkl/humanml3D_train.pkl"
-    TEST : "/home/weihsin/datasets/PretrainDatasetPkl/humanml3D_test.pkl"
+    TRAIN : "./dataset/humanml3D_train.pkl"  # atau path yang benar
+    TEST : "./dataset/humanml3D_test.pkl"    # atau path yang benar
     BATCH_SIZE: 16
 
 OPTIMIZER:

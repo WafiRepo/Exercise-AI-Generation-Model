@@ -1,5 +1,4 @@
 import json, argparse, tqdm, time, os, re
-import anthropic
 from dotenv import load_dotenv
 from detection import read_template, read_data, acc, g_eval
 
@@ -31,9 +30,26 @@ if __name__ == '__main__':
     # argparser.add_argument('--predict', type=str, default="./results/boxing_gpt/geval/geval_epoch_31.json")
     # argparser.add_argument('--predict', type=str, default="./results/GT_BX/geval/results.json")
     argparser.add_argument('--predict', type=str, default="./results/GT_FS/geval/results.json")
+    # Tambahkan argument untuk provider
+    argparser.add_argument('--provider', type=str, default='anthropic',
+                          choices=['anthropic', 'openai'],
+                          help='LLM provider: anthropic (Claude) or openai (GPT)')
+    argparser.add_argument('--api_key', type=str, default=None,
+                          help='API key (if not provided, will use env var)')
     args = argparser.parse_args()
 
-    api_key     = os.getenv("ANTHROPIC_KEY")
+    # Get API key dari argument atau environment variable
+    if args.api_key:
+        api_key = args.api_key
+    elif args.provider == 'openai':
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables. Set it with: export OPENAI_API_KEY=your_key")
+    else:  # anthropic
+        api_key = os.getenv("ANTHROPIC_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_KEY not found in environment variables. Set it with: export ANTHROPIC_KEY=your_key")
+    
     prompt      = read_template(args.prompt_fp)
 
     Scores      = {}
@@ -47,7 +63,7 @@ if __name__ == '__main__':
             
     # G-eval
     results             = read_data(args.predict)
-    avg_score, score    = g_eval(args, results, prompt, api_key, filename, indicator)
+    avg_score, score    = g_eval(args, results, prompt, api_key, filename, indicator, provider=args.provider)
     avg_score_name      = indicator + '_Detection_avg_score'
     score_name          = indicator + '_Detection_score'
 
@@ -62,7 +78,16 @@ if __name__ == '__main__':
     
     Scores[acc_score_name] = acc_score
     Scores[acc_shot_count_name] = acc_shot_count
-    Scores[acc_name] = acc_score/acc_shot_count
+    if acc_shot_count > 0:
+        Scores[acc_name] = acc_score/acc_shot_count
+    else:
+        Scores[acc_name] = 0.0
+        print("⚠ Warning: No valid entries for accuracy calculation. Accuracy set to 0.")
 
+    # Ensure output directory exists
+    os.makedirs(args.output, exist_ok=True)
+    
     with open(all_filepath, 'w') as f:
         json.dump(Scores, f, indent=4)
+    
+    print(f"✓ Saved final scores to: {all_filepath}")

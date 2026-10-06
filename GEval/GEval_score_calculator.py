@@ -1,8 +1,20 @@
-import openai, json, argparse, tqdm, time, os, re, anthropic
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+import json, argparse, tqdm, time, os, re
 from dotenv import load_dotenv
 
 def read_template(prompt_fp):
-    text_template = open(args.prompt_fp).read()
+    text_template = open(prompt_fp).read()
     return text_template
 
 def read_data(ground_truth_path, predict_path) :
@@ -18,48 +30,65 @@ def read_data(ground_truth_path, predict_path) :
                         "system_output" : predictions.get(key, "")})
     return results
 
-def g_eval(args,summeval, prompt, api_key, epoch) :
+def g_eval(args, summeval, prompt, api_key, epoch, provider='anthropic'):
     new_json = []
     count, ignore, all_score = 0, 0, 0
-    for instance in tqdm.tqdm(summeval) :
+    
+    for instance in tqdm.tqdm(summeval):
         source = instance['source']
         system_output = instance['system_output']
         # Handle output from GPT4_o.
-        if type(system_output) == list :
+        if type(system_output) == list:
             system_output = system_output[0]
         cur_prompt = prompt.replace('{{Document}}', source).replace('{{Summary}}', system_output)
         instance['prompt'] = cur_prompt
         
-        client = anthropic.Anthropic(api_key = api_key)
         try:
-            _response = client.messages.create(model = "claude-3-5-sonnet-20240620",
-                                               messages = [{"role" : "user", "content" : cur_prompt}],
-                                               max_tokens = 5)
-            content = _response.content
-            text_value = content[0].text
+            if provider == 'openai':
+                if not OPENAI_AVAILABLE:
+                    raise ImportError("openai module not installed. Install with: pip install openai")
+                client = openai.OpenAI(api_key=api_key)
+                _response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": cur_prompt}],
+                    max_tokens=5
+                )
+                text_value = _response.choices[0].message.content
+            else:  # anthropic
+                if not ANTHROPIC_AVAILABLE:
+                    raise ImportError("anthropic module not installed. Install with: pip install anthropic")
+                client = anthropic.Anthropic(api_key=api_key)
+                _response = client.messages.create(
+                    model="claude-3-5-sonnet-20240620",
+                    messages=[{"role": "user", "content": cur_prompt}],
+                    max_tokens=5
+                )
+                content = _response.content
+                text_value = content[0].text
+            
             match = re.search(r'\d+', text_value)
             instance['all_responses'] = text_value
             instance['score'] = int(match.group())
             
             new_json.append(instance)
-
             count += 1
             all_score += instance['score']
-
+            
         except Exception as e:
             print('Exception:', e)
             ignore += 1
             
     output_filename = f'geval_epoch_{epoch}.json'
     output_filepath = os.path.join(args.output, output_filename)
-    with open(output_filepath, 'w') as f :
-        json.dump(new_json, f, indent = 4)
-    return all_score / count
+    os.makedirs(args.output, exist_ok=True)
+    with open(output_filepath, 'w') as f:
+        json.dump(new_json, f, indent=4)
+    return all_score / count if count > 0 else 0
 
 if __name__ == '__main__' :
     load_dotenv()
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--prompt_fp', type = str, default = './GEval_Consistency_Template.txt')
+    argparser.add_argument('--prompt_fp', type=str, default='./GEval/GEval_Consistency_Template.txt')
 
     # argparser.add_argument('--ground_truth', type=str, default='./ground_truth_test.json')
     
@@ -124,12 +153,32 @@ if __name__ == '__main__' :
     # argparser.add_argument('--predict', type = str, default = '../results/boxing_evaluation/jsons')
     # argparser.add_argument('--output', type = str, default = '../results/boxing_evaluation/geval/.')
 
-    argparser.add_argument('--ground_truth', type = str, default = '../results/skating_gt/skating_gt.json')
-    argparser.add_argument('--predict', type = str, default = '../results/skating_gt/jsons')
-    argparser.add_argument('--output', type = str, default = '../results/skating_gt/geval/.')
+    argparser.add_argument('--ground_truth', type=str, default='./results/skating_gt/skating_gt.json')
+    argparser.add_argument('--predict', type=str, default='./results/skating_gt/jsons/results_epoch50.json')
+    argparser.add_argument('--output', type=str, default='./results/skating_gt/geval/')
+    argparser.add_argument('--epoch', type=int, default=50, help='Epoch number for single file evaluation')
+    
+    # Tambahkan argument untuk provider
+    argparser.add_argument('--provider', type=str, default='anthropic',
+                          choices=['anthropic', 'openai'],
+                          help='LLM provider: anthropic (Claude) or openai (GPT)')
+    argparser.add_argument('--api_key', type=str, default=None,
+                          help='API key (if not provided, will use env var)')
 
     args = argparser.parse_args()
-    api_key = os.getenv("ANTHROPIC_KEY")
+    
+    # Get API key dari argument atau environment variable
+    if args.api_key:
+        api_key = args.api_key
+    elif args.provider == 'openai':
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables. Set it with: export OPENAI_API_KEY=your_key")
+    else:  # anthropic
+        api_key = os.getenv("ANTHROPIC_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_KEY not found in environment variables. Set it with: export ANTHROPIC_KEY=your_key")
+    
     prompt = read_template(args.prompt_fp)
 
     if os.path.isdir(args.predict) :
@@ -151,8 +200,8 @@ if __name__ == '__main__' :
             filename_without_extension = file_name.split('.json')[0]
             print(filename_without_extension)
             results = read_data(args.ground_truth, file_path)
-            score = g_eval(args, results, prompt, api_key, epoch)
-            all_epoch[filename_without_extension] = {'score' : score, 'epoch' : epoch}
+            score = g_eval(args, results, prompt, api_key, epoch, provider=args.provider)
+            all_epoch[filename_without_extension] = {'score': score, 'epoch': epoch}
 
         sorted_all_epoch = dict(sorted(all_epoch.items(), key = lambda item : item[1]['score'], reverse = True))
 
@@ -173,8 +222,9 @@ if __name__ == '__main__' :
         file_path = os.path.join(args.predict, filename)
 
         results = read_data(args.ground_truth, args.predict)
-        score = g_eval(args, results, prompt, api_key, filename)
-        Scores[filename] = {'score' : score}
+        epoch = args.epoch if hasattr(args, 'epoch') else filename_without_extension
+        score = g_eval(args, results, prompt, api_key, epoch, provider=args.provider)
+        Scores[filename] = {'score': score}
 
         with open(all_filepath, 'w') as f :
             json.dump(Scores, f, indent = 4)
